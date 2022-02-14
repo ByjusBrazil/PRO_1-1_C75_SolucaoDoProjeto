@@ -8,7 +8,8 @@ import {
   ImageBackground,
   Image,
   Alert,
-  KeyboardAvoidingView
+  KeyboardAvoidingView,
+  ToastAndroid
 } from "react-native";
 import * as Permissions from "expo-permissions";
 import { BarCodeScanner } from "expo-barcode-scanner";
@@ -28,22 +29,16 @@ export default class RideScreen extends Component {
       hasCameraPermissions: null,
       scanned: false,
       bikeType: "",
-      userName: "",
-      email: firebase.auth().currentUser.email
+      userName: ""
     };
-  }
-
-  async componentDidMount() {
-    const { email } = this.state;
-    await this.getUserDetails(email);
   }
 
   getCameraPermissions = async () => {
     const { status } = await Permissions.askAsync(Permissions.CAMERA);
 
     this.setState({
-      /*status === "granted" is true when user has granted permission
-          status === "granted" is false when user has not granted the permission
+      /*status === "granted" é verdadeiro se o usuário concedeu permissão
+          status === "granted" é falso se o usuário não concedeu permissão
         */
       hasCameraPermissions: status === "granted",
       domState: "scanner",
@@ -60,27 +55,25 @@ export default class RideScreen extends Component {
   };
 
   handleTransaction = async () => {
-    var { bikeId, userId, email } = this.state;
+    var { bikeId, userId } = this.state;
     await this.getBikeDetails(bikeId);
+    await this.getUserDetails(userId);
 
     var transactionType = await this.checkBikeAvailability(bikeId);
 
     if (!transactionType) {
       this.setState({ bikeId: "" });
-      Alert.alert("Kindly enter/scan valid bike id");
+      Alert.alert("Por favor insira/digitalize um ID válido");
     } else if (transactionType === "under_maintenance") {
       this.setState({
         bikeId: ""
       });
     } else if (transactionType === "rented") {
-      var isEligible = await this.checkUserEligibilityForStartRide(
-        userId,
-        email
-      );
+      var isEligible = await this.checkUserEligibilityForStartRide(userId);
 
       if (isEligible) {
         var { bikeType, userName } = this.state;
-        this.assignBike(bikeId, userId, bikeType, userName, email);
+        this.assignBike(bikeId, userId, bikeType, userName);
         Alert.alert(
           "Você alugou a bicicleta pela próxima 1 hora. Aproveite seu passeio!!"
         );
@@ -97,13 +90,12 @@ export default class RideScreen extends Component {
     } else {
       var isEligible = await this.checkUserEligibilityForEndRide(
         bikeId,
-        userId,
-        email
+        userId
       );
 
       if (isEligible) {
         var { bikeType, userName } = this.state;
-        this.returnBike(bikeId, userId, bikeType, userName, email);
+        this.returnBike(bikeId, userId, bikeType, userName);
         Alert.alert("Esperamos que tenha gostado do seu passeio");
         this.setState({
           bikeAssigned: false
@@ -132,9 +124,9 @@ export default class RideScreen extends Component {
       });
   };
 
-  getUserDetails = email => {
+  getUserDetails = userId => {
     db.collection("users")
-      .where("email_id", "==", email)
+      .where("id", "==", userId)
       .get()
       .then(snapshot => {
         snapshot.docs.map(doc => {
@@ -159,9 +151,9 @@ export default class RideScreen extends Component {
     } else {
       bikeRef.docs.map(doc => {
         if (!doc.data().under_maintenance) {
-          //if the bike is available then transaction type will be rented
-          // otherwise it will be return
-          transactionType = doc.data().is_bike_available ? "rented" : "return";
+          // se a bicicleta estiver disponível, o tipo de transação será "rented",
+          // caso contrário, será "return"
+          transactionType = doc.data().is_bike_available ? "Alugado" : "Retornar";
         } else {
           transactionType = "under_maintenance";
           Alert.alert(doc.data().maintenance_message);
@@ -172,11 +164,10 @@ export default class RideScreen extends Component {
     return transactionType;
   };
 
-  checkUserEligibilityForStartRide = async (userId, email) => {
+  checkUserEligibilityForStartRide = async userId => {
     const userRef = await db
       .collection("users")
       .where("id", "==", userId)
-      .where("email_id", "==", email)
       .get();
 
     var isUserEligible = false;
@@ -185,7 +176,7 @@ export default class RideScreen extends Component {
         bikeId: ""
       });
       isUserEligible = false;
-      Alert.alert("Invalid user id");
+      Alert.alert("Id de Usuário inválido");
     } else {
       userRef.docs.map(doc => {
         if (!doc.data().bike_assigned) {
@@ -203,11 +194,10 @@ export default class RideScreen extends Component {
     return isUserEligible;
   };
 
-  checkUserEligibilityForEndRide = async (bikeId, userId, email) => {
+  checkUserEligibilityForEndRide = async (bikeId, userId) => {
     const transactionRef = await db
       .collection("transactions")
       .where("bike_id", "==", bikeId)
-      .where("email_id", "==", email)
       .limit(1)
       .get();
     var isUserEligible = "";
@@ -226,61 +216,59 @@ export default class RideScreen extends Component {
     return isUserEligible;
   };
 
-  assignBike = async (bikeId, userId, bikeType, userName, email) => {
-    //add a transaction
+  assignBike = async (bikeId, userId, bikeType, userName) => {
+    // adicionar uma transação
     db.collection("transactions").add({
       user_id: userId,
       user_name: userName,
       bike_id: bikeId,
       bike_type: bikeType,
       date: firebase.firestore.Timestamp.now().toDate(),
-      transaction_type: "rented",
-      email_id: email
+      transaction_type: "rented"
     });
-    //change bike status
+    // alterar status da bicicleta
     db.collection("bicycles")
       .doc(bikeId)
       .update({
         is_bike_available: false
       });
-    //change value  of bike assigned for user
+    // mudar o valor referente a bicicleta alugada pelo usuário
     db.collection("users")
       .doc(userId)
       .update({
         bike_assigned: true
       });
 
-    // Updating local state
+    // atualizando estado local
     this.setState({
       bikeId: ""
     });
   };
 
-  returnBike = async (bikeId, userId, bikeType, userName, email) => {
-    //add a transaction
+  returnBike = async (bikeId, userId, bikeType, userName) => {
+    // adicionar uma transação
     db.collection("transactions").add({
       user_id: userId,
       user_name: userName,
       bike_id: bikeId,
       bike_type: bikeType,
       date: firebase.firestore.Timestamp.now().toDate(),
-      transaction_type: "return",
-      email_id: email
+      transaction_type: "return"
     });
-    //change bike status
+    // alterar status da bicicleta
     db.collection("bicycles")
       .doc(bikeId)
       .update({
         is_bike_available: true
       });
-    //change value  of bike assigned for user
+    // mudar o valor referente a bicicleta alugada pelo usuário
     db.collection("users")
       .doc(userId)
       .update({
         bike_assigned: false
       });
 
-    // Updating local state
+    // atualizando estado local
     this.setState({
       bikeId: ""
     });
@@ -298,7 +286,7 @@ export default class RideScreen extends Component {
     }
     return (
       <KeyboardAvoidingView behavior="padding" style={styles.container}>
-         <View style={styles.upperContainer}>
+        <View style={styles.upperContainer}>
           <Image source={appIcon} style={styles.appIcon} />
           <Text style={styles.title}>Ciclista Eletrônico</Text>
           <Text style={styles.subtitle}>Um passeio ecologicamente correto</Text>
@@ -335,7 +323,7 @@ export default class RideScreen extends Component {
             onPress={this.handleTransaction}
           >
             <Text style={styles.buttonText}>
-              {bikeAssigned ? "Finalizar passeio" : "Desbloquear"}
+              {bikeAssigned ? "Finalizar" : "Desbloquear"}
             </Text>
           </TouchableOpacity>
         </View>
