@@ -29,8 +29,14 @@ export default class RideScreen extends Component {
       hasCameraPermissions: null,
       scanned: false,
       bikeType: "",
-      userName: ""
+      userName: "",
+      email: firebase.auth().currentUser.email
     };
+  }
+
+  async componentDidMount() {
+    const { email } = this.state;
+    await this.getUserDetails(email);
   }
 
   getCameraPermissions = async () => {
@@ -124,9 +130,9 @@ export default class RideScreen extends Component {
       });
   };
 
-  getUserDetails = userId => {
+  getUserDetails = email => {
     db.collection("users")
-      .where("id", "==", userId)
+      .where("email_id", "==", email)
       .get()
       .then(snapshot => {
         snapshot.docs.map(doc => {
@@ -164,10 +170,11 @@ export default class RideScreen extends Component {
     return transactionType;
   };
 
-  checkUserEligibilityForStartRide = async userId => {
+   checkUserEligibilityForStartRide = async (userId, email) => {
     const userRef = await db
       .collection("users")
       .where("id", "==", userId)
+      .where("email_id", "==", email)
       .get();
 
     var isUserEligible = false;
@@ -194,10 +201,11 @@ export default class RideScreen extends Component {
     return isUserEligible;
   };
 
-  checkUserEligibilityForEndRide = async (bikeId, userId) => {
+  checkUserEligibilityForEndRide = async (bikeId, userId, email) => {
     const transactionRef = await db
       .collection("transactions")
       .where("bike_id", "==", bikeId)
+      .where("email_id", "==", email)
       .limit(1)
       .get();
     var isUserEligible = "";
@@ -224,7 +232,8 @@ export default class RideScreen extends Component {
       bike_id: bikeId,
       bike_type: bikeType,
       date: firebase.firestore.Timestamp.now().toDate(),
-      transaction_type: "rented"
+      transaction_type: "rented",
+      email_id: email
     });
     // alterar status da bicicleta
     db.collection("bicycles")
@@ -253,7 +262,8 @@ export default class RideScreen extends Component {
       bike_id: bikeId,
       bike_type: bikeType,
       date: firebase.firestore.Timestamp.now().toDate(),
-      transaction_type: "return"
+      transaction_type: "return",
+      email_id: email
     });
     // alterar status da bicicleta
     db.collection("bicycles")
